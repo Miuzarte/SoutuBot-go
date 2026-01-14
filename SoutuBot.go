@@ -57,6 +57,12 @@ func (c *Client) Search(ctx context.Context, imgData []byte) (*Response, error) 
 	})
 }
 
+func (c *Client) GetResult(ctx context.Context, id string) (*Response, error) {
+	return c.do(ctx, func() (*http.Request, error) {
+		return c.buildResultRequest(ctx, "https://soutubot.moe/api/results/"+id)
+	})
+}
+
 func (c *Client) do(ctx context.Context, requestBuilder func() (*http.Request, error)) (*Response, error) {
 	if c.cacheEmpty() {
 		c.bypassCfAndGetM(ctx)
@@ -104,8 +110,13 @@ TRYAGAIN:
 		}
 	}
 
+	body, err := io.ReadAll(hResp.Body)
+	if err != nil {
+		return nil, err
+	}
 	resp := &Response{}
-	err = json.NewDecoder(hResp.Body).Decode(resp)
+	// err = json.NewDecoder(hResp.Body).Decode(resp)
+	err = json.Unmarshal(body, resp)
 	if err != nil {
 		return nil, err
 	}
@@ -171,9 +182,22 @@ func bodyGetGlobalM(body string) (m int64) {
 	return m
 }
 
+func (c *Client) requesetSetHeader(req *http.Request) {
+	req.Header.Set("Accept", "application/json, text/plain, */*")
+	req.Header.Set("Origin", "https://soutubot.moe")
+	req.Header.Set("Referer", "https://soutubot.moe/")
+	req.Header.Set("Dnt", "1")
+	req.Header.Set("X-Requested-With", "XMLHttpRequest")
+	req.Header.Set("User-Agent", c.cache.userAgent)
+	req.Header.Set("X-Api-Key", calcApiKey(len(c.cache.userAgent), c.cache.m))
+	for _, c := range c.cache.cookies {
+		req.AddCookie(c)
+	}
+}
+
 func (c *Client) buildRequest(ctx context.Context, imgData []byte) (*http.Request, error) {
-	var body bytes.Buffer
-	w := multipart.NewWriter(&body)
+	body := &bytes.Buffer{}
+	w := multipart.NewWriter(body)
 	err := w.SetBoundary(WEBKIT_BOUNDARY_PREFIX + randAsciiSuffix(WEBKIT_BOUNDARY_SUFFIX_LEN))
 	if err != nil {
 		return nil, err
@@ -199,22 +223,22 @@ func (c *Client) buildRequest(ctx context.Context, imgData []byte) (*http.Reques
 		return nil, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, API_URL, &body)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, API_URL, body)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", w.FormDataContentType())
-	req.Header.Set("Accept", "application/json, text/plain, */*")
-	req.Header.Set("Origin", "https://soutubot.moe")
-	req.Header.Set("Referer", "https://soutubot.moe/")
-	req.Header.Set("Dnt", "1")
-	req.Header.Set("X-Requested-With", "XMLHttpRequest")
-	req.Header.Set("User-Agent", c.cache.userAgent)
-	req.Header.Set("X-Api-Key", calcApiKey(len(c.cache.userAgent), c.cache.m))
-	for _, c := range c.cache.cookies {
-		req.AddCookie(c)
-	}
+	c.requesetSetHeader(req)
 
+	return req, nil
+}
+
+func (c *Client) buildResultRequest(ctx context.Context, resultUrl string) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, resultUrl, nil)
+	if err != nil {
+		return nil, err
+	}
+	c.requesetSetHeader(req)
 	return req, nil
 }
 
@@ -263,11 +287,11 @@ type Response struct {
 }
 
 type Item struct {
-	Source          Source   `json:"source"` // "nhentai"|"ehentai"
+	Source          Source   `json:"source"` // "nhentai"|"ehentai"|"panda"
 	Page            int      `json:"page"`
 	Title           string   `json:"title"`
 	Language        Language `json:"language"`    // "cn"|"jp"
-	PagePath        string   `json:"pagePath"`    // /g/480041/7
+	PagePath        string   `json:"pagePath"`    // /g/480041/7 | .Source == "panda" => null
 	SubjectPath     string   `json:"subjectPath"` // /g/480041
 	PreviewImageUrl string   `json:"previewImageUrl"`
 	Similarity      float64  `json:"similarity"` // 低匹配度阈值为 30
@@ -275,28 +299,29 @@ type Item struct {
 
 type Source string
 
-func (s Source) Hosts() [2]string {
-	if hosts, ok := sourceToHosts[string(s)]; ok {
+func (s Source) Hosts() []string {
+	if hosts, ok := sourceToHosts[s]; ok {
 		return hosts
 	}
-	return [2]string{string(s), string(s)}
+	return []string{string(s)}
 }
 
-var sourceToHosts = map[string][2]string{
+var sourceToHosts = map[Source][]string{
 	"nhentai": {"https://nhentai.net", "https://nhentai.xxx"},
 	"ehentai": {"https://e-hentai.org", "https://exhentai.org"},
+	"panda":   {"https://panda.chaika.moe"},
 }
 
 type Language string
 
 func (l Language) Emoji() string {
-	if emoji, ok := languageToEmoji[string(l)]; ok {
+	if emoji, ok := languageToEmoji[l]; ok {
 		return emoji
 	}
 	return string(l)
 }
 
-var languageToEmoji = map[string]string{
+var languageToEmoji = map[Language]string{
 	"cn": "🇨🇳",
 	"jp": "🇯🇵",
 	"gb": "🇬🇧",
