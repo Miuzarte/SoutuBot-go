@@ -26,12 +26,17 @@ import (
 func main() {
     fsClient := fs.NewClient("http://127.0.0.1:8191/v1")
     client := stb.NewClient(fsClient)
+    ctx := context.Background()
 
     var imgData []byte // raw png/jpg/webp
-    resp, err := client.Search(context.Background(), imgData)
+    resp, err := client.Search(ctx, imgData)
     if err != nil {
         panic(err)
     }
+
+    // 获取之前的搜索结果
+    const id = "2026011412270786"
+    // resp, err := client.GetResult(ctx, id)
 
     fmt.Printf("上传的原图片: %s\n", resp.ImageUrl)
     fmt.Printf(
@@ -58,9 +63,10 @@ func main() {
             }
         }
 
-        var hosts [2]string = item.Source.Hosts()
+        var hosts []string = item.Source.Hosts()
         // [0]: "https://nhentai.net"  / [1]: "https://nhentai.xxx"
         // [0]: "https://e-hentai.org" / [1]: "https://exhentai.org"
+        // [0]: "https://panda.chaika.moe"
 
         fmt.Printf(
             "[%d] %s\n匹配度: %.2f%%\n语言: %s\n来源: %s\n",
@@ -70,9 +76,13 @@ func main() {
             item.Source,
         )
         fmt.Printf("详情页1: %s\n", hosts[0]+item.SubjectPath)
-        fmt.Printf("详情页2: %s\n", hosts[1]+item.SubjectPath)
+        if len(hosts) >= 2 {
+            fmt.Printf("详情页2: %s\n", hosts[1]+item.SubjectPath)
+        }
         fmt.Printf("图片页1: %s\n", hosts[0]+item.PagePath)
-        fmt.Printf("图片页2: %s\n", hosts[1]+item.PagePath)
+        if len(hosts) >= 2 {
+            fmt.Printf("图片页2: %s\n", hosts[1]+item.PagePath)
+        }
 
         lastI = i
     }
